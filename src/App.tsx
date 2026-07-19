@@ -55,6 +55,10 @@ export default function App() {
       />
     );
   }
+  // Password is required to open the app: stay locked until it's entered.
+  if (pw === null) {
+    return <UnlockGate onUnlock={setPw} fullScreen />;
+  }
 
   return (
     <div className="app">
@@ -69,7 +73,7 @@ export default function App() {
             ["timeline", "Activity Timeline"],
             ["screenshots", "Screenshots"],
             ["categories", "Categories"],
-            ["rules", "Rules (Monitor)"],
+            ["rules", "Rules"],
             ["settings", "Settings"],
           ] as [View, string][]
         ).map(([k, label]) => (
@@ -81,6 +85,9 @@ export default function App() {
             {label}
           </button>
         ))}
+        <button className="navbtn lock" onClick={() => setPw(null)}>
+          🔒 Lock
+        </button>
         <div className="status-pill">
           <div>
             <span className={`dot ${status?.running ? "on" : "off"}`} />
@@ -99,12 +106,9 @@ export default function App() {
         {view === "screenshots" && <Screenshots />}
         {view === "categories" && <Categories />}
         {view === "rules" && <Rules />}
-        {view === "settings" &&
-          (pw === null ? (
-            <UnlockGate onUnlock={setPw} />
-          ) : (
-            <Settings pw={pw} onMonitor={() => api.monitorStatus().then(setStatus)} />
-          ))}
+        {view === "settings" && (
+          <Settings pw={pw} onMonitor={() => api.monitorStatus().then(setStatus)} />
+        )}
       </main>
     </div>
   );
@@ -182,7 +186,13 @@ function FirstRunSetup({ onDone }: { onDone: (pw: string) => void }) {
   );
 }
 
-function UnlockGate({ onUnlock }: { onUnlock: (pw: string) => void }) {
+function UnlockGate({
+  onUnlock,
+  fullScreen,
+}: {
+  onUnlock: (pw: string) => void;
+  fullScreen?: boolean;
+}) {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [recover, setRecover] = useState(false);
@@ -206,12 +216,20 @@ function UnlockGate({ onUnlock }: { onUnlock: (pw: string) => void }) {
   };
 
   return (
-    <div className="gate-inline">
+    <div className={fullScreen ? "gate-screen" : "gate-inline"}>
       <div className="gate-card">
-        <h1>{recover ? "Reset password" : "Locked"}</h1>
+        {fullScreen && (
+          <div className="brand" style={{ marginBottom: 12 }}>
+            Niv<span>ara</span>
+            <small>Parental Activity Monitor</small>
+          </div>
+        )}
+        <h1>{recover ? "Reset password" : fullScreen ? "🔒 Locked" : "Locked"}</h1>
         <p className="sub">
           {recover
             ? "Enter your recovery code and a new password."
+            : fullScreen
+            ? "Enter the parent password to open Nivara."
             : "Enter the parent password to access Settings."}
         </p>
         {!recover ? (

@@ -48,31 +48,59 @@ npm run tauri dev            # runs dashboard; monitor is started from Settings
 .\copy-exes.ps1              # build debug exes and copy into dist\ for manual testing
 ```
 
-### Release installer (NSIS + MSI, bundles WebView2 + monitor sidecar)
+### Release installer (NSIS + MSI, bundles WebView2)
 ```powershell
-.\build-installer.ps1
+.\build-installer.ps1                 # build at the current version
+.\build-installer.ps1 -Version 0.3.0  # bump all version files, then build
 ```
-This: (1) builds `nivara-monitor` release, (2) stages it as the Tauri
-`externalBin` sidecar `src-tauri/binaries/nivara-monitor-<triple>.exe`, (3) runs
-`npm run tauri build`. Output installers land in
-`src-tauri/target/release/bundle/{nsis,msi}/`.
+Runs `npm run tauri build`; installers land in
+`src-tauri/target/release/bundle/{nsis,msi}/`, and the NSIS `.exe` is also copied
+into `dist/` as the single distributable.
 
 Packaging notes:
 - `tauri.conf.json` → `bundle.targets: ["nsis","msi"]`.
-- **WebView2** is embedded via `webviewInstallMode: offlineInstaller` (works
-  offline; larger installer).
-- The **monitor** ships as an `externalBin` sidecar so it installs *next to*
-  `nivara.exe`. Autostart writes an HKCU `Run` value pointing at that installed
-  `nivara-monitor.exe` (path resolved relative to `nivara.exe`, i.e. the real
-  install dir — not a hardcoded path).
+- **WebView2** is embedded via `webviewInstallMode: offlineInstaller`, so the
+  installer works on a clean machine with **no internet** (larger installer).
+- The **monitor** ships as the package's second `[[bin]]`; Tauri bundles it
+  automatically next to `nivara.exe`. Do **not** also list it as `externalBin` —
+  that duplicates the file and fails the MSI build with WiX ICE30. Autostart
+  writes an HKCU `Run` value pointing at the installed `nivara-monitor.exe`
+  (resolved relative to `nivara.exe`, i.e. the real install dir).
 - **Uninstall gate:** `installer-hooks.nsh` (`NSIS_HOOK_PREUNINSTALL`) runs
   `nivara.exe --uninstall-gate`, which prompts for the parent password and
-  returns exit 0 (allow) / 1 (deny). NSIS aborts the uninstall on non-zero.
+  returns exit 0 (allow) / 1 (deny); NSIS aborts on non-zero. It is **skipped on
+  a silent uninstall** (`IfSilent`) so version upgrades — which run the old
+  uninstaller silently — don't demand the password. (Consequence: a manual
+  `uninstall.exe /S` bypasses the prompt — a deterrent limitation.)
 
-> Because the monitor is a sidecar, `cargo build`/`cargo test` also require the
-> sidecar file to exist (Tauri validates `externalBin` at build time). The build
-> scripts stage it; if you build cargo directly, copy any `nivara-monitor.exe`
-> to `src-tauri/binaries/nivara-monitor-x86_64-pc-windows-msvc.exe` first.
+### Releasing versioned updates
+Distribute as **in-place installer upgrades** (no auto-update server):
+1. `.\build-installer.ps1 -Version X.Y.Z` — bumps `tauri.conf.json`,
+   `package.json`, and `Cargo.toml` (write UTF-8 **without BOM**; PS 5.1's
+   `Set-Content -Encoding utf8` adds a BOM that breaks JSON/TOML — the script
+   uses `.NET` `UTF8Encoding($false)` instead).
+2. Commit, then send the new `dist/nivara_X.Y.Z_x64-setup.exe`.
+3. Running it over an existing install upgrades the program files. **User data
+   is preserved** — the SQLite DB, screenshots, and password live in
+   `%LOCALAPPDATA%\Nivara`, which install/upgrade/uninstall never touch.
+- **Bump the version every release** — upgrades are recognized by version number.
+- **Schema migration:** startup runs the schema batch, so *new tables/settings*
+  (`CREATE TABLE IF NOT EXISTS`, `INSERT OR IGNORE`) migrate automatically on an
+  existing DB. *Adding a column to an existing table* needs an explicit
+  `ALTER TABLE` migration in `db.rs::open` — the `IF NOT EXISTS` guard won't add it.
+- If hands-off fleet updates become necessary, `tauri-plugin-updater` +
+  GitHub-Releases-hosted signed artifacts is the upgrade path (deferred; needs a
+  signing keypair). Not currently set up.
+
+### Visibility (deliberately NOT hidden)
+Nivara is a **visible, removable** deterrent, by design:
+- Runs low-profile — the monitor is windowless, no tray icon.
+- It is **not** concealed: it stays listed in Programs & Features (removable),
+  visible in Task Manager, and is not disguised as a system process. Process
+  hiding, removing the uninstall entry, and other detection-evasion techniques
+  are intentionally **out of scope** (that is stalkerware; see the protection
+  section). Only cosmetic, non-deceptive low-profile choices (e.g. skipping a
+  desktop shortcut) are acceptable.
 
 ## Features
 

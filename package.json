@@ -1,7 +1,7 @@
 {
   "name": "nivara",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,3 +24,4 @@
     "vite": "^7.0.4"
   }
 }
+
