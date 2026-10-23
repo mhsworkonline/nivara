@@ -28,3 +28,27 @@
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Policies\System" "DisableTaskMgr"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Policies\System" "DisableCMD"
 !macroend
+
+; PREINSTALL / POSTINSTALL: in-place upgrades overwrite files, so the running
+; background monitor must be stopped first (its exe would be locked). If it was
+; running, start it again after the new files are in place.
+Var NivaraMonWasRunning
+
+!macro NSIS_HOOK_PREINSTALL
+  StrCpy $NivaraMonWasRunning 0
+  nsExec::ExecToStack 'cmd /c tasklist /FI "IMAGENAME eq nivara-monitor.exe" | find /I "nivara-monitor.exe"'
+  Pop $0
+  Pop $1
+  ${If} $0 = 0
+    StrCpy $NivaraMonWasRunning 1
+    nsExec::Exec 'taskkill /F /IM nivara-monitor.exe'
+    Sleep 1000
+  ${EndIf}
+!macroend
+
+!macro NSIS_HOOK_POSTINSTALL
+  ${If} $NivaraMonWasRunning = 1
+    Exec '"$INSTDIR
+ivara-monitor.exe"'
+  ${EndIf}
+!macroend
