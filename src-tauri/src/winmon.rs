@@ -236,3 +236,27 @@ pub fn capture_screen_jpeg(quality: u8) -> Option<Vec<u8>> {
         Some(out.into_inner())
     }
 }
+
+/// Lock the current session (shows the Windows lock screen).
+pub fn lock_workstation() {
+    unsafe {
+        let _ = windows::Win32::System::Shutdown::LockWorkStation();
+    }
+}
+
+/// True while the session is locked / showing the secure desktop: the input
+/// desktop can't be opened from a normal user process then.
+pub fn is_session_locked() -> bool {
+    use windows::Win32::System::StationsAndDesktops::{
+        CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_SWITCHDESKTOP,
+    };
+    unsafe {
+        match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_SWITCHDESKTOP) {
+            Ok(h) => {
+                let _ = CloseDesktop(h);
+                false
+            }
+            Err(_) => true,
+        }
+    }
+}

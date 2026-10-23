@@ -542,6 +542,47 @@ pub fn auth_recover(recovery_code: String, new_password: String) -> Result<(), S
     auth::recover(&c, &recovery_code, &new_password)
 }
 
+// ---- Screen-time limit + restrictions ------------------------------------
+
+#[tauri::command]
+pub fn screentime_status() -> Result<crate::screentime::Status, String> {
+    let c = conn()?;
+    crate::screentime::roll_day(&c);
+    Ok(crate::screentime::compute(&c, db::now_epoch()))
+}
+
+#[tauri::command]
+pub fn screentime_grant(minutes: i64) -> Result<(), String> {
+    let c = conn()?;
+    crate::screentime::grant(&c, minutes.clamp(1, 600), db::now_epoch());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn screentime_reset_today() -> Result<(), String> {
+    let c = conn()?;
+    crate::screentime::roll_day(&c);
+    for (k, v) in [
+        ("limit_used_secs", "0"),
+        ("limit_bonus_secs", "0"),
+        ("limit_pass_until", "0"),
+        ("limit_warned5_day", ""),
+        ("limit_warned1_day", ""),
+    ] {
+        db::set_setting(&c, k, v).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Enable/disable the HKCU Task Manager + cmd policy (visible, reversible).
+#[tauri::command]
+pub fn restrictions_apply(enabled: bool) -> Result<(), String> {
+    let c = conn()?;
+    crate::screentime::set_restrictions(enabled).map_err(|e| e.to_string())?;
+    db::set_setting(&c, "restrict_taskmgr_cmd", if enabled { "1" } else { "0" })
+        .map_err(|e| e.to_string())
+}
+
 // ---- DNS website filtering (elevated apply/remove) ----------------------
 
 /// Point the active adapters' DNS at Nivara's local proxy — and ONLY the proxy
@@ -553,6 +594,13 @@ pub fn auth_recover(recovery_code: String, new_password: String) -> Result<(), S
 /// To avoid breaking DNS, this WAITS for the proxy to actually answer on
 /// 127.0.0.1:53 before repointing, and aborts (leaving DNS unchanged) if it
 /// never comes up. Requires elevation (UAC). Explicit, reversible, bypassable.
+/// Selects adapters by actual link status (Up), not by whether they already
+/// happen to report a DNS server — the old `ServerAddresses.Count -gt 0`
+/// filter could match nothing (e.g. an adapter mid-DHCP-negotiation), in which
+/// case the elevated script "succeeded" while silently touching no adapter.
+const DNS_ADAPTER_FILTER: &str =
+    r#"Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceAlias -notmatch 'Loopback|vEthernet|Virtual|VPN' }"#;
+
 #[tauri::command]
 pub fn dns_filter_apply() -> Result<(), String> {
     let c = conn()?;
@@ -565,9 +613,46 @@ pub fn dns_filter_apply() -> Result<(), String> {
                 .into(),
         );
     }
-    run_elevated_ps(
-        r#"Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object {$_.ServerAddresses.Count -gt 0 -and $_.InterfaceAlias -notlike '*Loopback*'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -ServerAddresses '127.0.0.1' }; Clear-DnsClientCache"#,
-    )
+    let apply_ps = format!(
+        r#"{} | ForEach-Object {{ Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses '127.0.0.1' }}; Clear-DnsClientCache"#,
+        DNS_ADAPTER_FILTER
+    );
+    if let Err(e) = run_elevated_ps(&apply_ps) {
+        // UAC declined or the script errored outright — roll back so the DB
+        // never claims "enabled" while the adapter is untouched.
+        db::set_setting(&c, "dns_filter_enabled", "0").ok();
+        return Err(e);
+    }
+    if !dns_points_at_proxy() {
+        // The elevated script ran and exited 0, but no adapter actually ended
+        // up pointed at 127.0.0.1 (e.g. the filter matched zero adapters).
+        // Best-effort cleanup, then roll back and report failure honestly.
+        let remove_ps = format!(
+            r#"{} | ForEach-Object {{ Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }}; Clear-DnsClientCache"#,
+            DNS_ADAPTER_FILTER
+        );
+        let _ = run_elevated_ps(&remove_ps);
+        db::set_setting(&c, "dns_filter_enabled", "0").ok();
+        return Err(
+            "DNS change did not take effect on any active network adapter. DNS filtering was not enabled."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// Read-only check: does at least one active (non-loopback) adapter currently
+/// report 127.0.0.1 as a DNS server? Used to verify the elevated apply step
+/// actually took effect rather than trusting its exit code alone.
+fn dns_points_at_proxy() -> bool {
+    let check = r#"$r = Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet|Virtual|VPN' -and $_.ServerAddresses -contains '127.0.0.1' }; if ($r) { 'YES' } else { 'NO' }"#;
+    match Command::new("powershell")
+        .args(["-NoProfile", "-Command", check])
+        .output()
+    {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).contains("YES"),
+        Err(_) => false,
+    }
 }
 
 /// Send a DNS query to 127.0.0.1:53 and return true if the proxy answers within
@@ -602,9 +687,11 @@ fn wait_for_proxy(secs: u64) -> bool {
 pub fn dns_filter_remove() -> Result<(), String> {
     let c = conn()?;
     db::set_setting(&c, "dns_filter_enabled", "0").map_err(|e| e.to_string())?;
-    run_elevated_ps(
-        r#"Get-DnsClientServerAddress -AddressFamily IPv4 | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -ResetServerAddresses }; Clear-DnsClientCache"#,
-    )
+    let remove_ps = format!(
+        r#"{} | ForEach-Object {{ Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }}; Clear-DnsClientCache"#,
+        DNS_ADAPTER_FILTER
+    );
+    run_elevated_ps(&remove_ps)
 }
 
 /// Launch an elevated PowerShell command (UAC prompt) and wait for it.

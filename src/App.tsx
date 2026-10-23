@@ -16,6 +16,7 @@ import {
   type Rule,
   type RuleEvent,
   type ScreenshotRow,
+  type ScreenTimeStatus,
   type SettingRow,
 } from "./api";
 import "./App.css";
@@ -858,14 +859,18 @@ function Settings({ pw, onMonitor }: { pw: string; onMonitor: () => void }) {
   const [autostart, setAutostart] = useState(false);
   const [status, setStatus] = useState<MonitorStatus | null>(null);
   const [dnsBusy, setDnsBusy] = useState(false);
+  const [st, setSt] = useState<ScreenTimeStatus | null>(null);
 
   const reload = () => {
     api.settings().then(setSettings).catch(() => {});
     api.autostart().then(setAutostart).catch(() => {});
     api.monitorStatus().then(setStatus).catch(() => {});
+    api.screentimeStatus().then(setSt).catch(() => {});
   };
   useEffect(() => {
     reload();
+    const t = setInterval(() => api.screentimeStatus().then(setSt).catch(() => {}), 5000);
+    return () => clearInterval(t);
   }, []);
 
   const get = (k: string) => settings.find((s) => s.key === k)?.value ?? "";
@@ -992,6 +997,110 @@ function Settings({ pw, onMonitor }: { pw: string; onMonitor: () => void }) {
               </button>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>Screen Time</h2>
+        <div className="banner">
+          When the daily limit (or bedtime) is reached, Windows is locked. If it is unlocked again
+          while still over, a parent-password prompt appears; without it the session is locked
+          again. Deterrent only: it ends if the monitor is killed, and the child's own Windows
+          password still unlocks the screen.
+        </div>
+        <div className="setting-row">
+          <div className="k">
+            Enable screen-time limit
+            <small>
+              {st?.enabled
+                ? st.over
+                  ? st.in_bedtime
+                    ? "Bedtime — locked."
+                    : "Limit reached — locked."
+                  : st.remaining_secs != null
+                  ? `Used ${fmtDuration(st.used_secs)} today · ${fmtDuration(st.remaining_secs)} left` +
+                    (st.bonus_secs ? ` (incl. +${Math.round(st.bonus_secs / 60)}m granted)` : "")
+                  : `Used ${fmtDuration(st.used_secs)} today (no daily limit set)`
+                : "Counts active (non-idle) time per day. Needs the background monitor running."}
+            </small>
+          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={get("limit_enabled") === "1"}
+              onChange={(e) => toggle("limit_enabled", e.target.checked)}
+            />
+            <span className="slider" />
+          </label>
+        </div>
+        {[
+          ["limit_weekday_mins", "Weekday limit (minutes)", "Mon–Fri. 0 = no daily limit."],
+          ["limit_weekend_mins", "Weekend limit (minutes)", "Sat–Sun. 0 = no daily limit."],
+        ].map(([k, label, hint]) => (
+          <div className="setting-row" key={k}>
+            <div className="k">
+              {label}
+              <small>{hint}</small>
+            </div>
+            <input
+              type="number"
+              style={{ width: 100 }}
+              defaultValue={get(k)}
+              key={`${k}-${get(k)}`}
+              onBlur={(e) => update(k, e.target.value)}
+            />
+          </div>
+        ))}
+        <div className="setting-row">
+          <div className="k">
+            Bedtime (lock during)
+            <small>HH:MM-HH:MM, overnight OK (e.g. 21:30-07:00). Empty = none.</small>
+          </div>
+          <input
+            type="text"
+            style={{ width: 130 }}
+            placeholder="21:30-07:00"
+            defaultValue={get("bedtime_range")}
+            key={`bt-${get("bedtime_range")}`}
+            onBlur={(e) => update("bedtime_range", e.target.value.trim())}
+          />
+        </div>
+        <div className="setting-row">
+          <div className="k">
+            Today
+            <small>Grant extra time (also passes bedtime for that long) or reset the counter.</small>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn" onClick={() => api.screentimeGrant(15).then(reload)}>
+              +15 min
+            </button>
+            <button className="btn" onClick={() => api.screentimeGrant(30).then(reload)}>
+              +30 min
+            </button>
+            <button className="btn ghost" onClick={() => api.screentimeResetToday().then(reload)}>
+              Reset today
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div className="k">
+            Block Task Manager &amp; Command Prompt
+            <small>
+              Sets the per-user Windows policy that disables both. A speed bump only: it does not
+              stop PowerShell, and a child with an admin account can undo it. Cleared on uninstall;
+              recovery: <code>nivara.exe --clear-restrictions</code>.
+            </small>
+          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={get("restrict_taskmgr_cmd") === "1"}
+              onChange={(e) =>
+                api.restrictionsApply(e.target.checked).then(reload).catch((err) => alert(String(err)))
+              }
+            />
+            <span className="slider" />
+          </label>
         </div>
       </div>
 

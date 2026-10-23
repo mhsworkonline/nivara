@@ -125,7 +125,24 @@ export const api = {
   // DNS website filtering (elevated apply/remove)
   dnsFilterApply: () => invoke<void>("dns_filter_apply"),
   dnsFilterRemove: () => invoke<void>("dns_filter_remove"),
+  // Screen time + restrictions
+  screentimeStatus: () => invoke<ScreenTimeStatus>("screentime_status"),
+  screentimeGrant: (minutes: number) =>
+    invoke<void>("screentime_grant", { minutes }),
+  screentimeResetToday: () => invoke<void>("screentime_reset_today"),
+  restrictionsApply: (enabled: boolean) =>
+    invoke<void>("restrictions_apply", { enabled }),
 };
+
+export interface ScreenTimeStatus {
+  enabled: boolean;
+  used_secs: number;
+  allowance_secs: number | null;
+  remaining_secs: number | null;
+  bonus_secs: number;
+  in_bedtime: boolean;
+  over: boolean;
+}
 
 export function fmtDuration(secs: number): string {
   if (secs < 60) return `${secs}s`;

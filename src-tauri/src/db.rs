@@ -13,6 +13,19 @@ pub const DEFAULT_SETTINGS: &[(&str, &str)] = &[
     ("enforcement_enabled", "0"),
     ("dns_filter_enabled", "0"),
     ("dns_upstream", "1.1.1.1"),
+    // Screen-time limit (see screentime.rs). 0 minutes = no daily limit.
+    ("limit_enabled", "0"),
+    ("limit_weekday_mins", "120"),
+    ("limit_weekend_mins", "180"),
+    ("bedtime_range", ""),
+    ("limit_used_secs", "0"),
+    ("limit_day", ""),
+    ("limit_bonus_secs", "0"),
+    ("limit_pass_until", "0"),
+    ("limit_warned5_day", ""),
+    ("limit_warned1_day", ""),
+    // HKCU policy: disable Task Manager + cmd (speed bump only).
+    ("restrict_taskmgr_cmd", "0"),
 ];
 
 const SCHEMA: &str = r#"

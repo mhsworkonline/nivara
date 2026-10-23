@@ -172,6 +172,7 @@ pub fn run_loop() {
 
     let mut current: Option<Session> = None;
     let mut last_screenshot: i64 = 0;
+    let mut screen_time = crate::screentime::Enforcer::new();
 
     loop {
         let now = db::now_epoch();
@@ -232,6 +233,7 @@ pub fn run_loop() {
         // apps are terminated even in the background. Website DNS blocklist is
         // refreshed from the live rules table (independent of app enforcement).
         enforce_app_rules(&conn, now);
+        screen_time.tick(&conn, now, idle, &|m| log(m));
         let domains = website_blocklist(&conn);
         if let Ok(mut bl) = blocklist.lock() {
             if *bl != domains {

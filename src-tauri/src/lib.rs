@@ -4,6 +4,7 @@ pub mod db;
 pub mod dns;
 pub mod monitor;
 pub mod rules;
+pub mod screentime;
 pub mod winmon;
 
 mod commands;
@@ -18,6 +19,21 @@ fn handle_cli() {
     if let Some(pos) = args.iter().position(|a| a == "--check-password") {
         let pw = args.get(pos + 1).cloned().unwrap_or_default();
         std::process::exit(check_password_exit_code(&pw));
+    }
+
+    // Parent-password prompt to grant extra screen time (launched by the
+    // monitor after the child unlocks while over the limit). 0 = granted.
+    if args.iter().any(|a| a == "--grant-time") {
+        std::process::exit(if screentime::grant_prompt_cli() { 0 } else { 1 });
+    }
+
+    // Lockout recovery: remove the Task Manager / cmd policy.
+    if args.iter().any(|a| a == "--clear-restrictions") {
+        let _ = screentime::set_restrictions(false);
+        if let Ok(c) = db::open() {
+            let _ = db::set_setting(&c, "restrict_taskmgr_cmd", "0");
+        }
+        std::process::exit(0);
     }
 
     // Interactive uninstall gate: prompt for the password (via a PowerShell
@@ -104,6 +120,10 @@ pub fn run() {
             commands::auth_recover,
             commands::dns_filter_apply,
             commands::dns_filter_remove,
+            commands::screentime_status,
+            commands::screentime_grant,
+            commands::screentime_reset_today,
+            commands::restrictions_apply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

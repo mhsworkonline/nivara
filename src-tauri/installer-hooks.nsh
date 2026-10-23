@@ -21,3 +21,10 @@
   ${EndIf}
   nivara_skip_pw_gate:
 !macroend
+
+; POSTUNINSTALL: never leave Task Manager / cmd disabled behind (Nivara's
+; optional restriction toggle writes these HKCU policy values).
+!macro NSIS_HOOK_POSTUNINSTALL
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Policies\System" "DisableTaskMgr"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Policies\System" "DisableCMD"
+!macroend
